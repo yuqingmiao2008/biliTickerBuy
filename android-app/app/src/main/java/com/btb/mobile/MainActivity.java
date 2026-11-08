@@ -148,9 +148,9 @@ public class MainActivity extends Activity {
                 "export HOME=" + TERMUX_HOME + ";" +
                 "export PATH=$PREFIX/bin:$PATH;" +
                 "cd $HOME/biliTickerBuy || exit 1;" +
-                "nohup proot-distro login debian --bind $HOME/biliTickerBuy:/opt/btb -- " +
-                "bash -lc 'cd /opt/btb && exec .venv/bin/python main.py ui --server_name 127.0.0.1 --port 7860' " +
-                "> $HOME/btb-server.log 2>&1 &";
+                "termux-wake-lock >/dev/null 2>&1 || true;" +
+                "exec proot-distro login debian --bind $HOME/biliTickerBuy:/opt/btb -- " +
+                "bash -lc 'cd /opt/btb && exec .venv/bin/python main.py ui --server_name 127.0.0.1 --port 7860'";
     }
 
     private boolean startViaTermux(String script) {
