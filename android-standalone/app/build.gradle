@@ -35,6 +35,12 @@ chaquopy {
         pip {
             install "requests==2.32.3"
             install "httpx==0.28.1"
+            install "loguru"
+            install "tinydb"
+            install "qrcode"
+            install "h2"
+            install "ntplib"
+            install "certifi"
         }
     }
 }
