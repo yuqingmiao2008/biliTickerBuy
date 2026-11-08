@@ -2,13 +2,13 @@ def check():
     import sys
     out = [sys.version.split()[0]]
     try:
-        import pydantic
-        out.append("pydantic " + pydantic.VERSION)
+        import requests
+        out.append("requests " + requests.__version__)
     except Exception as e:
-        out.append("pydantic FAIL: " + repr(e))
+        out.append("requests FAIL: " + repr(e))
     try:
-        import gradio
-        out.append("gradio " + gradio.__version__)
+        import httpx
+        out.append("httpx " + httpx.__version__)
     except Exception as e:
-        out.append("gradio FAIL: " + repr(e))
+        out.append("httpx FAIL: " + repr(e))
     return "\n".join(out)
