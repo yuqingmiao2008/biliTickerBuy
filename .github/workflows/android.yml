@@ -2,6 +2,9 @@ name: Build BTB Mobile APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/mobile-interval-multiaccount
 
 permissions:
   contents: read
