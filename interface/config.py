@@ -128,6 +128,14 @@ def normalize_time_start(value: Any) -> str:
     return parsed.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+MIN_REQUEST_INTERVAL_MS = 10
+MAX_REQUEST_INTERVAL_MS = 5000
+
+
+def _clamp_interval(ms: int) -> int:
+    return max(MIN_REQUEST_INTERVAL_MS, min(MAX_REQUEST_INTERVAL_MS, int(ms)))
+
+
 def normalize_interval(value: Any) -> int:
     if value in (None, ""):
         return 1000
@@ -136,11 +144,11 @@ def normalize_interval(value: Any) -> int:
     if isinstance(value, int):
         if value <= 0:
             raise ValueError("interval must be greater than 0")
-        return value
+        return _clamp_interval(value)
     if isinstance(value, float):
         if not math.isfinite(value) or value <= 0:
             raise ValueError("interval must be greater than 0")
-        return int(round(value))
+        return _clamp_interval(int(round(value)))
 
     text = str(value).strip().lower()
     if not text:
@@ -149,7 +157,7 @@ def normalize_interval(value: Any) -> int:
         parsed = int(text)
         if parsed <= 0:
             raise ValueError("interval must be greater than 0")
-        return parsed
+        return _clamp_interval(parsed)
 
     match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*(ms|s|sec|secs|m|min|mins)?", text)
     if not match:
@@ -169,7 +177,7 @@ def normalize_interval(value: Any) -> int:
         "min": 60000,
         "mins": 60000,
     }[unit]
-    return max(1, int(round(amount * multiplier)))
+    return _clamp_interval(int(round(amount * multiplier)))
 
 
 def normalize_non_negative_interval(value: Any, *, default: int = 0) -> int:

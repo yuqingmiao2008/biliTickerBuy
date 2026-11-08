@@ -212,8 +212,14 @@ def go_start_tab():
             interval_ui = gr.Number(
                 label="抢票间隔",
                 value=None,
-                minimum=1,
-                info="默认抢票请求间隔（单位：毫秒）",
+                minimum=10,
+                maximum=5000,
+                info="请求间隔（毫秒），支持 10–5000ms；实际会加 ±20% 随机抖动",
+            )
+            multi_account_ui = gr.Checkbox(
+                label="多账号并发",
+                value=False,
+                info="使用本机已登录的全部账号，每个账号各跑一个任务",
             )
 
     @runtime_state_writer(GO_UPLOADED_FILES_STATE_KEY, kind="path_list")
@@ -290,10 +296,21 @@ def go_start_tab():
         filename: str,
         *,
         config: BuyConfig,
+        account=None,
     ):
         with open(filename, "r", encoding="utf-8") as file:
             content = file.read()
         filename_only = os.path.basename(filename)
+        if account is not None:
+            try:
+                payload = json.loads(content)
+                payload["cookies"] = account.cookies
+                base_detail = str(payload.get("detail") or "").strip()
+                payload["detail"] = f"{base_detail}-{account.name}" if base_detail else account.name
+                content = json.dumps(payload, ensure_ascii=False)
+                filename_only = f"{filename_only} · {account.name}"
+            except Exception as exc:
+                logger.warning(f"注入账号 {getattr(account, 'name', '?')} 的 cookie 失败：{exc}")
         logger.info(f"启动 {filename_only}")
         log_file_path = _build_task_log_path(filename_only)
         logger.info(f"任务 {filename_only} 的日志文件：{log_file_path}")
@@ -309,7 +326,7 @@ def go_start_tab():
         )
         return proc
 
-    def start_go(files, time_start, interval):
+    def start_go(files, time_start, interval, multi_account=False):
         if not files:
             gr.Warning("未提交抢票配置。")
             return gr.update(visible=False)
@@ -318,7 +335,7 @@ def go_start_tab():
             interval = int(interval)
         except (TypeError, ValueError):
             interval = DEFAULT_REQUEST_INTERVAL
-        interval = max(1, interval)
+        interval = max(10, min(5000, interval))
         ConfigDB.insert("requestInterval", interval)
 
         https_proxys = ConfigDB.get("https_proxy") or ""
@@ -405,16 +422,32 @@ def go_start_tab():
             gr.Info("抢票任务已按代理池并发策略启动。")
             return gr.update(visible=True)
 
+        accounts = []
+        if multi_account:
+            try:
+                from util.request.CookieManager import CookieManager
+
+                accounts = CookieManager().get_accounts()
+            except Exception as exc:
+                logger.warning(f"读取多账号失败，回退单账号：{exc}")
+            if len(accounts) <= 1:
+                accounts = []
+                gr.Warning("本机只登录了一个账号，已回退为单账号启动。")
+            else:
+                gr.Info(f"多账号并发：{len(accounts)} 个账号")
+
         for idx, filename in enumerate(files):
             if assigned_proxies == []:
                 left_task_num = len(files) - idx
                 assigned_proxies = split_proxies(https_proxy_list, left_task_num)
-            launch_task(
-                filename,
-                config=buy_config.with_overrides(
-                    https_proxys=",".join(assigned_proxies[assigned_proxies_next_idx]),
-                ),
+            task_config = buy_config.with_overrides(
+                https_proxys=",".join(assigned_proxies[assigned_proxies_next_idx]),
             )
+            if accounts:
+                for account in accounts:
+                    launch_task(filename, config=task_config, account=account)
+            else:
+                launch_task(filename, config=task_config)
             assigned_proxies_next_idx += 1
         gr.Info("抢票任务已启动，下面可以直接查看日志链接或停止任务。")
         return gr.update(visible=True)
@@ -513,7 +546,7 @@ def go_start_tab():
 
     go_btn.click(
         fn=start_go,
-        inputs=[upload_ui, _time_tmp, interval_ui],
+        inputs=[upload_ui, _time_tmp, interval_ui, multi_account_ui],
         outputs=task_panel,
     ).then(
         fn=refresh_task_panel,

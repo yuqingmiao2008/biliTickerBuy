@@ -499,7 +499,7 @@ def buy_stream(config: BuyConfig):
     # use_local_token = bool(config.use_local_token)
     browser_window_state = generate_browser_window_state()
     token_payload = _build_token_payload(tickets_info)
-    request_interval = max(1, int(config.interval or 1000))
+    request_interval = max(10, min(5000, int(config.interval or 1000)))
     effective_retry_limit = max(1, int(config.create_retry_limit))
     effective_batch_size = max(1, int(config.create_request_batch_size))
     rate_limit_delay_ms = max(0, int(config.rate_limit_delay_ms))
@@ -849,7 +849,7 @@ def buy_stream(config: BuyConfig):
                                 logger.warning(f"循环内项目详情复检失败（忽略）：{exc}")
                             _reset_refresh_counter()
                     if should_sleep_before_next_attempt:
-                        time.sleep(request_interval / 1000)
+                        time.sleep(max(0.01, random.uniform(request_interval * 0.8, request_interval * 1.2) / 1000))
 
                 if (
                     result is not None
