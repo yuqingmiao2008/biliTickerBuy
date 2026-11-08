@@ -206,6 +206,9 @@ def _start_tasks(body):
         cookies = _current_cookies()
         if cookies:
             payload["cookies"] = cookies
+        elif "cookies" not in payload:
+            _set(running=False)
+            return {"ok": False, "error": "未登录且配置里没有 cookies，请先扫码登录"}
         tasks.append(("当前账号", payload))
 
     _stop_flag["stop"] = False
