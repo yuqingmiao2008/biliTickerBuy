@@ -183,7 +183,7 @@ class BiliRequest:
     def _build_h2_headers(self, *, method: str, is_json: bool) -> dict[str, str]:
         headers = {
             "accept": "*/*",
-            "accept-encoding": "gzip, deflate, br, zstd",
+            "accept-encoding": "gzip, deflate",
             "connection": "keep-alive",
             **self.headers,
         }
