@@ -27,6 +27,8 @@ public class MainActivity extends Activity {
     private static final String SERVER_URL = "http://127.0.0.1:7860/";
     private static final String TERMUX_PREFIX = "/data/data/com.termux/files/usr";
     private static final String TERMUX_HOME = "/data/data/com.termux/files/home";
+    private static final String TERMUX_PERMISSION = "com.termux.permission.RUN_COMMAND";
+    private static final int REQ_TERMUX = 1001;
 
     private WebView webView;
     private LinearLayout statusPanel;
@@ -35,6 +37,7 @@ public class MainActivity extends Activity {
     private Button retryButton;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean started = false;
+    private boolean bootstrapping = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -77,12 +80,25 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         setContentView(root);
+        if (checkSelfPermission(TERMUX_PERMISSION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{TERMUX_PERMISSION}, REQ_TERMUX);
+        }
         startBootstrap();
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_TERMUX) {
+            started = false;
+            startBootstrap();
+        }
+    }
+
     private void startBootstrap() {
-        if (started) return;
+        if (started || bootstrapping) return;
         started = true;
+        bootstrapping = true;
         retryButton.setVisibility(View.GONE);
         progressBar.setVisibility(View.VISIBLE);
         statusText.setText("正在启动本地服务…\n首次启动需要几十秒");
@@ -185,6 +201,7 @@ public class MainActivity extends Activity {
 
     private void showWebView() {
         handler.post(() -> {
+            bootstrapping = false;
             statusPanel.setVisibility(View.GONE);
             webView.loadUrl(SERVER_URL);
         });
@@ -192,6 +209,7 @@ public class MainActivity extends Activity {
 
     private void showError(String message) {
         handler.post(() -> {
+            bootstrapping = false;
             progressBar.setVisibility(View.GONE);
             statusText.setText(message);
             retryButton.setVisibility(View.VISIBLE);

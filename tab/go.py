@@ -210,11 +210,11 @@ def go_start_tab():
 
         with gr.Row(elem_classes="btb-inline-actions !justify-end"):
             interval_ui = gr.Number(
-                label="抢票间隔",
+                label="抢票间隔（毫秒）",
                 value=None,
                 minimum=10,
                 maximum=5000,
-                info="请求间隔（毫秒），支持 10–5000ms；实际会加 ±20% 随机抖动",
+                info="10–5000ms，即 0.01–5 秒；实际会加 ±20% 随机抖动",
             )
             multi_account_ui = gr.Checkbox(
                 label="多账号并发",
