@@ -22,12 +22,13 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" >/dev/null
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          TOOLS="$(ls -d "$SDK"/cmdline-tools/*/bin | tail -1)"
+          echo "$TOOLS" >> "$GITHUB_PATH"
+          yes | "$TOOLS/sdkmanager" --licenses >/dev/null || true
+          "$TOOLS/sdkmanager" "platform-tools" "platforms;android-34" "build-tools;34.0.0" >/dev/null
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
