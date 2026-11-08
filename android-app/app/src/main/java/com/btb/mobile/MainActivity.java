@@ -1,6 +1,7 @@
 package com.btb.mobile;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -93,10 +94,14 @@ public class MainActivity extends Activity {
             }
             String rootResult = runSu("id");
             if (rootResult == null || !rootResult.contains("uid=0")) {
-                showError("没有拿到 root 权限。\n本机需要 root + Termux 环境。");
-                return;
+                // 没有 root 授权时，改走 Termux 的 RUN_COMMAND 通道
+                if (!startViaTermux(buildTermuxScript())) {
+                    showError("没有拿到 root 权限，也无法唤起 Termux。\n请安装 Termux 后重试，或在 Termux 里手动启动服务。");
+                    return;
+                }
+            } else {
+                runSu(buildStartCommand());
             }
-            runSu(buildStartCommand());
             for (int i = 0; i < 90; i++) {
                 if (isServerUp()) {
                     showWebView();
@@ -120,6 +125,32 @@ public class MainActivity extends Activity {
                 "bash -lc 'cd /opt/btb && exec .venv/bin/python main.py ui --server_name 127.0.0.1 --port 7860' " +
                 "> $HOME/btb-server.log 2>&1 &";
         return script;
+    }
+
+    private String buildTermuxScript() {
+        return "export PREFIX=" + TERMUX_PREFIX + ";" +
+                "export HOME=" + TERMUX_HOME + ";" +
+                "export PATH=$PREFIX/bin:$PATH;" +
+                "cd $HOME/biliTickerBuy || exit 1;" +
+                "nohup proot-distro login debian --bind $HOME/biliTickerBuy:/opt/btb -- " +
+                "bash -lc 'cd /opt/btb && exec .venv/bin/python main.py ui --server_name 127.0.0.1 --port 7860' " +
+                "> $HOME/btb-server.log 2>&1 &";
+    }
+
+    private boolean startViaTermux(String script) {
+        try {
+            Intent intent = new Intent();
+            intent.setClassName("com.termux", "com.termux.app.RunCommandService");
+            intent.setAction("com.termux.RUN_COMMAND");
+            intent.putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_PREFIX + "/bin/bash");
+            intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-c", script});
+            intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", TERMUX_HOME);
+            intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
+            startService(intent);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String runSu(String command) {
