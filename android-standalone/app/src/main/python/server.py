@@ -152,6 +152,31 @@ def _run_one(name, payload, interval, time_start):
         _log(traceback.format_exc(limit=3))
 
 
+def _fetch_context(body):
+    fetch_purchase_context = _imports["fetch_purchase_context"]
+    project = str(body.get("project") or "").strip()
+    if not project:
+        return {"ok": False, "error": "项目 ID 或链接为空"}
+    context = fetch_purchase_context(
+        project,
+        cookies_path=_cookies_path(),
+        selected_date=body.get("date") or None,
+    )
+    return {"ok": True, "context": context}
+
+
+def _build_config(body):
+    build_ticket_config_from_selection = _imports["build_ticket_config_from_selection"]
+    context = body.get("context")
+    selection = body.get("selection")
+    if not isinstance(context, dict):
+        return {"ok": False, "error": "缺少项目上下文"}
+    if not isinstance(selection, dict):
+        return {"ok": False, "error": "缺少选择参数"}
+    config = build_ticket_config_from_selection(context, selection)
+    return {"ok": True, "config": config}
+
+
 def _start_tasks(body):
     if _state["running"]:
         return {"ok": False, "error": "已有任务在运行"}
@@ -261,6 +286,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_poll_qr(body.get("key") or ""))
             elif parsed.path == "/api/start":
                 self._json(_start_tasks(body))
+            elif parsed.path == "/api/project":
+                self._json(_fetch_context(body))
+            elif parsed.path == "/api/build":
+                self._json(_build_config(body))
             elif parsed.path == "/api/stop":
                 _stop_flag["stop"] = True
                 _log("收到停止请求")
@@ -297,6 +326,8 @@ def start(home, port=7861):
     from util.request.CookieManager import CookieManager
     from app_cmd.config.BuyConfig import BuyConfig
     from task.buy import buy_stream
+    from interface.project import fetch_purchase_context
+    from interface.config import build_ticket_config_from_selection
 
     _imports.update({
         "get_login_state": get_login_state,
@@ -305,6 +336,8 @@ def start(home, port=7861):
         "CookieManager": CookieManager,
         "BuyConfig": BuyConfig,
         "buy_stream": buy_stream,
+        "fetch_purchase_context": fetch_purchase_context,
+        "build_ticket_config_from_selection": build_ticket_config_from_selection,
     })
 
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
@@ -353,6 +386,21 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
       <div class="muted" id="qrHint">用 B 站 App 扫码</div>
     </div>
     <div id="accounts" class="muted" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
+    <h2>项目</h2>
+    <div class="row">
+      <input id="project" placeholder="项目 ID 或 show.bilibili.com 链接">
+      <button id="pullBtn">拉取票档</button>
+    </div>
+    <div id="projectInfo" class="muted" style="margin-top:8px"></div>
+    <div id="tickets" style="margin-top:8px"></div>
+    <div id="buyers" style="margin-top:8px"></div>
+    <div id="addr" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="buildBtn">生成配置</button>
+    </div>
   </section>
 
   <section class="card">
@@ -476,6 +524,56 @@ $('startBtn').onclick = async () => {
 
 $('stopBtn').onclick = () => api('/api/stop', {});
 $('refreshBtn').onclick = refreshStatus;
+
+let purchaseContext = null;
+
+function renderProject(ctx) {
+  purchaseContext = ctx;
+  $('projectInfo').textContent = (ctx.project_name || '') + (ctx.project_id ? ' · ' + ctx.project_id : '');
+  const tickets = ctx.ticket_options || [];
+  $('tickets').innerHTML = '<div class="muted">票档</div>' + tickets.map((t, i) =>
+    '<label style="display:block;margin:6px 0"><input type="radio" name="ticket" value="' + i + '" style="width:auto"> ' +
+    (t.display || t.id) + ' ¥' + (t.price ?? '') + ' <span class="muted">sku ' + t.id + '</span></label>').join('');
+  const buyers = ctx.buyers || [];
+  $('buyers').innerHTML = '<div class="muted">购票人</div>' + buyers.map((b, i) =>
+    '<label style="display:block;margin:6px 0"><input type="checkbox" class="buyer" value="' + i + '" style="width:auto"> ' +
+    (b.name || '') + ' <span class="muted">' + (b.tel || '') + '</span></label>').join('');
+  const addrs = ctx.addresses || [];
+  $('addr').innerHTML = '<div class="muted">地址</div>' + addrs.map((a, i) =>
+    '<label style="display:block;margin:6px 0"><input type="radio" name="addr" value="' + i + '" style="width:auto"> ' +
+    (a.name || '') + ' ' + (a.prov || '') + (a.city || '') + (a.area || '') + (a.addr || '') + '</label>').join('');
+}
+
+$('pullBtn').onclick = async () => {
+  const project = $('project').value.trim();
+  if (!project) { alert('填项目 ID 或链接'); return; }
+  $('projectInfo').textContent = '拉取中…';
+  const r = await api('/api/project', {project});
+  if (!r.ok) { $('projectInfo').textContent = r.error || '失败'; return; }
+  renderProject(r.context);
+};
+
+$('buildBtn').onclick = async () => {
+  if (!purchaseContext) { alert('先拉取票档'); return; }
+  const ticketEl = document.querySelector('input[name=ticket]:checked');
+  const addrEl = document.querySelector('input[name=addr]:checked');
+  const buyerEls = Array.from(document.querySelectorAll('input.buyer:checked'));
+  if (!ticketEl) { alert('选一个票档'); return; }
+  if (!buyerEls.length) { alert('选至少一个购票人'); return; }
+  if (!addrEl) { alert('选一个地址'); return; }
+  const firstBuyer = (purchaseContext.buyers || [])[parseInt(buyerEls[0].value, 10)] || {};
+  const r = await api('/api/build', {context: purchaseContext, selection: {
+    ticket_index: parseInt(ticketEl.value, 10),
+    buyer_indices: buyerEls.map(e => parseInt(e.value, 10)),
+    address_index: parseInt(addrEl.value, 10),
+    buyer: firstBuyer.name || '',
+    tel: firstBuyer.tel || purchaseContext.phone || '',
+    phone: purchaseContext.phone || ''
+  }});
+  if (!r.ok) { alert(r.error || '生成失败'); return; }
+  $('configText').value = JSON.stringify(r.config, null, 2);
+  alert('配置已生成，检查后点开始抢票');
+};
 
 setInterval(refreshStatus, 2000);
 setInterval(refreshLogs, 1000);
