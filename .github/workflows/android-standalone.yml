@@ -24,6 +24,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Python for Chaquopy buildPython
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Set up Android SDK
         run: |
           set -euo pipefail
