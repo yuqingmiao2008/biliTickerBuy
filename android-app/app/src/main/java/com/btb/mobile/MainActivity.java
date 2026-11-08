@@ -38,6 +38,7 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean started = false;
     private boolean bootstrapping = false;
+    private String lastError = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -112,7 +113,8 @@ public class MainActivity extends Activity {
             if (rootResult == null || !rootResult.contains("uid=0")) {
                 // 没有 root 授权时，改走 Termux 的 RUN_COMMAND 通道
                 if (!startViaTermux(buildTermuxScript())) {
-                    showError("没有拿到 root 权限，也无法唤起 Termux。\n请安装 Termux 后重试，或在 Termux 里手动启动服务。");
+                    showError("没有拿到 root 权限，也无法唤起 Termux。\n" + lastError +
+                            "\n请安装 Termux 后重试，或在 Termux 里手动启动服务。");
                     return;
                 }
             } else {
@@ -154,18 +156,27 @@ public class MainActivity extends Activity {
     }
 
     private boolean startViaTermux(String script) {
+        Intent intent = new Intent();
+        intent.setClassName("com.termux", "com.termux.app.RunCommandService");
+        intent.setAction("com.termux.RUN_COMMAND");
+        intent.putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_PREFIX + "/bin/bash");
+        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-c", script});
+        intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", TERMUX_HOME);
+        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
         try {
-            Intent intent = new Intent();
-            intent.setClassName("com.termux", "com.termux.app.RunCommandService");
-            intent.setAction("com.termux.RUN_COMMAND");
-            intent.putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_PREFIX + "/bin/bash");
-            intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-c", script});
-            intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", TERMUX_HOME);
-            intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
             startService(intent);
             return true;
-        } catch (Exception e) {
-            return false;
+        } catch (Exception e1) {
+            android.util.Log.e("BTB", "startService failed", e1);
+            try {
+                startForegroundService(intent);
+                return true;
+            } catch (Exception e2) {
+                android.util.Log.e("BTB", "startForegroundService failed", e2);
+                lastError = e1.getClass().getSimpleName() + ": " + e1.getMessage()
+                        + " / " + e2.getClass().getSimpleName() + ": " + e2.getMessage();
+                return false;
+            }
         }
     }
 
