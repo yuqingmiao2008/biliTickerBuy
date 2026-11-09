@@ -492,6 +492,7 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
     </div>
     <div class="muted" style="margin:8px 0 6px">抢票配置 JSON（生成配置后粘贴/导入的内容）</div>
     <textarea id="configText" placeholder='{"screen_id": ..., "sku_id": ..., "buyer_info": [...], ...}'></textarea>
+    <div class="muted" style="margin-top:6px">配置里的 pay_money 单位是“分”，6800 = ¥68.00，属正常</div>
     <div class="row" style="margin-top:8px">
       <input id="file" type="file" accept=".json,application/json" style="border:0;padding:0">
     </div>
@@ -608,11 +609,13 @@ function renderProject(ctx) {
   $('projectInfo').textContent = (ctx.project_name || '') + (ctx.project_id ? ' · ' + ctx.project_id : '');
   const tickets = ctx.ticket_options || [];
   const rows = tickets.map((t, i) => {
-    const text = t.display || ('票档 ' + t.id);
-    const unavailable = /售罄/.test(text);
+    const raw = t.display || ('票档 ' + t.id);
+    const text = raw.replace(/￥\s*\d+(?:\.\d+)?/, '').replace(/\s*-\s*-\s*/g, ' - ').trim();
+    const priceText = typeof t.price === 'number' ? ('¥' + (t.price / 100).toFixed(2)) : '';
+    const unavailable = /售罄/.test(raw);
     return '<label style="display:block;margin:6px 0;opacity:' + (unavailable ? '0.45' : '1') + '">' +
       '<input type="radio" name="ticket" value="' + i + '" style="width:auto"' + (unavailable ? ' disabled' : '') + '> ' +
-      text + ' <span class="muted">sku ' + t.id + '</span></label>';
+      text + (priceText ? ' · ' + priceText : '') + ' <span class="muted">sku ' + t.id + '</span></label>';
   }).join('');
   $('tickets').innerHTML = '<div class="muted">票档（仅「售罄」不可选）</div><div class="ticket-list">' + rows + '</div>';
   const firstAvailable = tickets.findIndex(t => !/售罄/.test(t.display || ''));
