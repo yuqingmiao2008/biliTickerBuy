@@ -6,6 +6,7 @@ BTB_HOME is set before util/__init__.py initialises its paths.
 
 import json
 import os
+import re
 import threading
 import time
 import traceback
@@ -152,17 +153,77 @@ def _run_one(name, payload, interval, time_start):
         _log(traceback.format_exc(limit=3))
 
 
+def _resolve_project_input(text):
+    """Accept a bare id, a detail URL, or a b23.tv short link."""
+    text = str(text or "").strip()
+    if text.isdigit():
+        return text, text
+    urls = re.findall(r"https?://[^\s，,。；;]+", text)
+    final_url = urls[0] if urls else text
+    if urls:
+        try:
+            import requests as _requests
+
+            response = _requests.get(
+                final_url,
+                allow_redirects=True,
+                timeout=10,
+                headers={"User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36"},
+            )
+            final_url = response.url or final_url
+        except Exception as exc:
+            _log(f"短链解析失败：{exc}")
+    match = re.search(r"[?&](?:id|projectId|project_id|itemsId|itemId)=(\d+)", final_url)
+    if not match:
+        match = re.search(r"/(\d{5,})(?:[/?#]|$)", final_url)
+    if not match:
+        raise ValueError(f"没从链接里解析出项目 ID：{final_url}")
+    return match.group(1), final_url
+
+
+def _resolve_only(body):
+    try:
+        project_id, final_url = _resolve_project_input(body.get("text"))
+        return {"ok": True, "project_id": project_id, "final_url": final_url}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _search_projects(body):
+    search_tickets = _imports["search_tickets"]
+    keyword = str(body.get("keyword") or "").strip()
+    if not keyword:
+        return {"ok": False, "error": "搜索关键词为空"}
+    result = search_tickets(keyword, cookies_path=_cookies_path(), page=1, pagesize=20)
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error") or "搜索失败", "requires_login": result.get("requires_login")}
+    items = []
+    for item in (result.get("results") or [])[:20]:
+        url = str(item.get("url") or "")
+        match = re.search(r"[?&](?:id|projectId|project_id|itemsId|itemId)=(\d+)", url)
+        pid = item.get("id") or item.get("project_id") or (match.group(1) if match else "")
+        items.append({
+            "id": str(pid or ""),
+            "title": item.get("title") or item.get("project_name") or "未知活动",
+            "city": item.get("city") or "",
+            "venue": item.get("venue_name") or "",
+            "time": item.get("tlabel") or item.get("start_time") or "",
+            "price_low": item.get("price_low"),
+            "price_high": item.get("price_high"),
+        })
+    return {"ok": True, "keyword": keyword, "items": items}
+
+
 def _fetch_context(body):
     fetch_purchase_context = _imports["fetch_purchase_context"]
-    project = str(body.get("project") or "").strip()
-    if not project:
-        return {"ok": False, "error": "项目 ID 或链接为空"}
+    project, resolved_url = _resolve_project_input(body.get("project"))
     context = fetch_purchase_context(
         project,
         cookies_path=_cookies_path(),
         selected_date=body.get("date") or None,
     )
-    return {"ok": True, "context": context}
+    context["resolved_from"] = resolved_url
+    return {"ok": True, "context": context, "project_id": project}
 
 
 def _build_config(body):
@@ -291,6 +352,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_start_tasks(body))
             elif parsed.path == "/api/project":
                 self._json(_fetch_context(body))
+            elif parsed.path == "/api/search":
+                self._json(_search_projects(body))
+            elif parsed.path == "/api/resolve":
+                self._json(_resolve_only(body))
             elif parsed.path == "/api/build":
                 self._json(_build_config(body))
             elif parsed.path == "/api/stop":
@@ -331,6 +396,7 @@ def start(home, port=7861):
     from task.buy import buy_stream
     from interface.project import fetch_purchase_context
     from interface.config import build_ticket_config_from_selection
+    from interface.search import search_tickets
 
     _imports.update({
         "get_login_state": get_login_state,
@@ -341,6 +407,7 @@ def start(home, port=7861):
         "buy_stream": buy_stream,
         "fetch_purchase_context": fetch_purchase_context,
         "build_ticket_config_from_selection": build_ticket_config_from_selection,
+        "search_tickets": search_tickets,
     })
 
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
@@ -394,7 +461,12 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
   <section class="card">
     <h2>项目</h2>
     <div class="row">
-      <input id="project" placeholder="项目 ID 或 show.bilibili.com 链接">
+      <input id="keyword" placeholder="搜活动名，比如 BW2026 / 演唱会名">
+      <button id="searchBtn">搜索</button>
+    </div>
+    <div id="searchResults" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:8px">
+      <input id="project" placeholder="项目 ID，或 show.bilibili.com / b23.tv 链接">
       <button id="pullBtn">拉取票档</button>
     </div>
     <div id="projectInfo" class="muted" style="margin-top:8px"></div>
@@ -547,13 +619,32 @@ function renderProject(ctx) {
     (a.name || '') + ' ' + (a.prov || '') + (a.city || '') + (a.area || '') + (a.addr || '') + '</label>').join('');
 }
 
-$('pullBtn').onclick = async () => {
-  const project = $('project').value.trim();
+async function pullProject(value) {
+  const project = (value !== undefined ? value : $('project').value).trim();
   if (!project) { alert('填项目 ID 或链接'); return; }
-  $('projectInfo').textContent = '拉取中…';
+  $('projectInfo').textContent = '解析并拉取中…';
   const r = await api('/api/project', {project});
   if (!r.ok) { $('projectInfo').textContent = r.error || '失败'; return; }
+  if (r.project_id) $('project').value = r.project_id;
   renderProject(r.context);
+}
+$('pullBtn').onclick = () => pullProject();
+
+$('searchBtn').onclick = async () => {
+  const keyword = $('keyword').value.trim();
+  if (!keyword) { alert('输入关键词'); return; }
+  $('searchResults').textContent = '搜索中…';
+  const r = await api('/api/search', {keyword});
+  if (!r.ok) { $('searchResults').textContent = r.error || '搜索失败'; return; }
+  const items = r.items || [];
+  if (!items.length) { $('searchResults').textContent = '没有结果'; return; }
+  $('searchResults').innerHTML = items.map(it =>
+    '<div class="result" data-id="' + (it.id || '') + '" style="padding:8px 0;border-bottom:1px solid #262626">' +
+    '<div>' + it.title + '</div>' +
+    '<div class="muted">' + (it.city || '') + ' · ' + (it.venue || '') + ' · ' + (it.time || '') + ' · ID ' + (it.id || '?') + '</div></div>').join('');
+  document.querySelectorAll('.result').forEach(el => {
+    el.onclick = () => { if (el.dataset.id) pullProject(el.dataset.id); };
+  });
 };
 
 $('buildBtn').onclick = async () => {
