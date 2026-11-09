@@ -438,6 +438,7 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
 #qr { background: #fff; width: 220px; height: 220px; border-radius: 10px; display: none; }
 .muted { color: #999; font-size: 12px; }
 #logs { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; max-height: 45vh; overflow: auto; background: #0b0b0b; border-radius: 8px; padding: 8px; }
+.ticket-list { max-height: 240px; overflow: auto; border: 1px solid #262626; border-radius: 8px; padding: 6px 8px; margin-top: 6px; }
 .ok { color: #4ade80; } .err { color: #f87171; }
 </style>
 </head>
@@ -606,17 +607,27 @@ function renderProject(ctx) {
   purchaseContext = ctx;
   $('projectInfo').textContent = (ctx.project_name || '') + (ctx.project_id ? ' · ' + ctx.project_id : '');
   const tickets = ctx.ticket_options || [];
-  $('tickets').innerHTML = '<div class="muted">票档</div>' + tickets.map((t, i) =>
-    '<label style="display:block;margin:6px 0"><input type="radio" name="ticket" value="' + i + '" style="width:auto"> ' +
-    (t.display || t.id) + ' ¥' + (t.price ?? '') + ' <span class="muted">sku ' + t.id + '</span></label>').join('');
+  const rows = tickets.map((t, i) => {
+    const text = t.display || ('票档 ' + t.id);
+    const unavailable = /售罄|停售|不可售/.test(text);
+    return '<label style="display:block;margin:6px 0;opacity:' + (unavailable ? '0.45' : '1') + '">' +
+      '<input type="radio" name="ticket" value="' + i + '" style="width:auto"' + (unavailable ? ' disabled' : '') + '> ' +
+      text + ' <span class="muted">sku ' + t.id + '</span></label>';
+  }).join('');
+  $('tickets').innerHTML = '<div class="muted">票档（售罄/停售不可选）</div><div class="ticket-list">' + rows + '</div>';
+  const firstAvailable = tickets.findIndex(t => !/售罄|停售|不可售/.test(t.display || ''));
+  if (firstAvailable >= 0) {
+    const el = document.querySelector('input[name=ticket][value="' + firstAvailable + '"]');
+    if (el) el.checked = true;
+  }
   const buyers = ctx.buyers || [];
-  $('buyers').innerHTML = '<div class="muted">购票人</div>' + buyers.map((b, i) =>
+  $('buyers').innerHTML = '<div class="muted">购票人</div><div class="ticket-list">' + buyers.map((b, i) =>
     '<label style="display:block;margin:6px 0"><input type="checkbox" class="buyer" value="' + i + '" style="width:auto"> ' +
-    (b.name || '') + ' <span class="muted">' + (b.tel || '') + '</span></label>').join('');
+    (b.name || '') + ' <span class="muted">' + (b.tel || '') + '</span></label>').join('') + '</div>';
   const addrs = ctx.addresses || [];
-  $('addr').innerHTML = '<div class="muted">地址</div>' + addrs.map((a, i) =>
+  $('addr').innerHTML = '<div class="muted">地址</div><div class="ticket-list">' + addrs.map((a, i) =>
     '<label style="display:block;margin:6px 0"><input type="radio" name="addr" value="' + i + '" style="width:auto"> ' +
-    (a.name || '') + ' ' + (a.prov || '') + (a.city || '') + (a.area || '') + (a.addr || '') + '</label>').join('');
+    (a.name || '') + ' ' + (a.prov || '') + (a.city || '') + (a.area || '') + (a.addr || '') + '</label>').join('') + '</div>';
 }
 
 async function pullProject(value) {
