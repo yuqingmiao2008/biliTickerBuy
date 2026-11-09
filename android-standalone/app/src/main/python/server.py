@@ -609,13 +609,13 @@ function renderProject(ctx) {
   const tickets = ctx.ticket_options || [];
   const rows = tickets.map((t, i) => {
     const text = t.display || ('票档 ' + t.id);
-    const unavailable = /售罄|停售|不可售/.test(text);
+    const unavailable = /售罄/.test(text);
     return '<label style="display:block;margin:6px 0;opacity:' + (unavailable ? '0.45' : '1') + '">' +
       '<input type="radio" name="ticket" value="' + i + '" style="width:auto"' + (unavailable ? ' disabled' : '') + '> ' +
       text + ' <span class="muted">sku ' + t.id + '</span></label>';
   }).join('');
-  $('tickets').innerHTML = '<div class="muted">票档（售罄/停售不可选）</div><div class="ticket-list">' + rows + '</div>';
-  const firstAvailable = tickets.findIndex(t => !/售罄|停售|不可售/.test(t.display || ''));
+  $('tickets').innerHTML = '<div class="muted">票档（仅「售罄」不可选）</div><div class="ticket-list">' + rows + '</div>';
+  const firstAvailable = tickets.findIndex(t => !/售罄/.test(t.display || ''));
   if (firstAvailable >= 0) {
     const el = document.querySelector('input[name=ticket][value="' + firstAvailable + '"]');
     if (el) el.checked = true;
