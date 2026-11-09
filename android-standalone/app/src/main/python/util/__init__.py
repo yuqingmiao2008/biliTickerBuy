@@ -54,7 +54,7 @@ LOG_DIR: str = os.environ.get("BTB_LOG_DIR", os.path.join(EXE_PATH, "btb_logs"))
 os.makedirs(LOG_DIR, exist_ok=True)
 log_file_name = os.environ.get("BTB_APP_LOG_NAME", "app.log")
 log_file_name = re.sub(r"[^\w.\-]", "_", log_file_name) or "app.log"
-loguru_config(LOG_DIR, log_file_name, enable_console=True, file_colorize=False)
+loguru_config(LOG_DIR, log_file_name, enable_console=False, file_colorize=False)
 
 __all__ = [
     "TEMP_PATH",
