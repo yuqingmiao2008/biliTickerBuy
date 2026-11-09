@@ -482,8 +482,14 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
   <section class="card">
     <h2>配置</h2>
     <div class="row">
-      <label class="muted">开抢时间</label>
-      <input id="timeStart" placeholder="2026-11-11T20:00:00，留空立即抢">
+      <label class="muted">开抢日期</label>
+      <input id="dateStart" type="date">
+      <label class="muted">时间</label>
+      <input id="timeStart" type="time" step="1">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="useSaleBtn" class="ghost">用所选票档开售时间</button>
+      <span class="muted">两个都留空 = 立即开抢</span>
     </div>
     <div class="row" style="margin-top:8px">
       <label class="muted">间隔(ms)</label>
@@ -586,13 +592,33 @@ $('file').onchange = (e) => {
   reader.readAsText(f);
 };
 
+function combinedTimeStart() {
+  const date = $('dateStart').value;
+  if (!date) return '';
+  let time = $('timeStart').value || '00:00:00';
+  if (time.length === 5) time += ':00';
+  return date + 'T' + time;
+}
+
+$('useSaleBtn').onclick = () => {
+  if (!purchaseContext) { alert('先拉取票档'); return; }
+  const el = document.querySelector('input[name=ticket]:checked');
+  if (!el) { alert('先选票档'); return; }
+  const ticket = (purchaseContext.ticket_options || [])[parseInt(el.value, 10)] || {};
+  const raw = String(ticket.sale_start || '').trim();
+  const match = raw.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) { alert('这个票档没有可用的开售时间'); return; }
+  $('dateStart').value = match[1] + '-' + match[2] + '-' + match[3];
+  $('timeStart').value = match[4] + ':' + match[5] + ':' + (match[6] || '00');
+};
+
 $('startBtn').onclick = async () => {
   const text = $('configText').value.trim();
   if (!text) { alert('先填入抢票配置 JSON'); return; }
   const r = await api('/api/start', {
     config_text: text,
     interval: parseInt($('interval').value || '500', 10),
-    time_start: $('timeStart').value.trim(),
+    time_start: combinedTimeStart(),
     multi_account: $('multi').checked
   });
   if (!r.ok) alert(r.error || '启动失败');
