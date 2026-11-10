@@ -241,7 +241,7 @@ def _build_config(body):
         return {"ok": False, "error": "缺少项目上下文"}
     if not isinstance(selection, dict):
         return {"ok": False, "error": "缺少选择参数"}
-    phone = re.sub(r"\D", "", str(body.get("phone") or ""))
+    phone = re.sub(r"\D", "", str(body.get("phone") or selection.get("phone") or ""))
     if not re.fullmatch(r"1\d{10}", phone):
         _log("生成配置失败：联系人手机号不是 11 位")
         return {"ok": False, "error": "请填写正确的 11 位联系人手机号"}
@@ -727,7 +727,7 @@ $('buildBtn').onclick = async () => {
   if (!addrEl) { $('buildMsg').textContent = '请选择一个地址'; return; }
   const firstBuyer = (purchaseContext.buyers || [])[parseInt(buyerEls[0].value, 10)] || {};
   $('buildMsg').textContent = '生成中…';
-  const r = await api('/api/build', {context: purchaseContext, selection: {
+  const r = await api('/api/build', {context: purchaseContext, phone: $('phoneInput').value.trim(), selection: {
     ticket_index: parseInt(ticketEl.value, 10),
     buyer_indices: buyerEls.map(e => parseInt(e.value, 10)),
     address_index: parseInt(addrEl.value, 10),
