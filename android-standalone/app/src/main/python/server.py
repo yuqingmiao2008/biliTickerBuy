@@ -241,8 +241,9 @@ def _build_config(body):
         return {"ok": False, "error": "缺少项目上下文"}
     if not isinstance(selection, dict):
         return {"ok": False, "error": "缺少选择参数"}
-    phone = str(body.get("phone") or "").strip()
+    phone = re.sub(r"\D", "", str(body.get("phone") or ""))
     if not re.fullmatch(r"1\d{10}", phone):
+        _log("生成配置失败：联系人手机号不是 11 位")
         return {"ok": False, "error": "请填写正确的 11 位联系人手机号"}
     selection = dict(selection)
     selection["tel"] = phone
@@ -252,6 +253,7 @@ def _build_config(body):
     except Exception:
         pass
     config = build_ticket_config_from_selection(context, selection)
+    _log(f"生成配置成功：{config.get('detail') or config.get('sku_id')}，联系人 {phone}")
     return {"ok": True, "config": config}
 
 
@@ -470,10 +472,6 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
   <section class="card">
     <h2>账号</h2>
     <div id="loginState" class="muted">检查中…</div>
-    <div class="row" style="margin-top:8px">
-      <label class="muted">联系人手机号</label>
-      <input id="phoneInput" type="tel" inputmode="numeric" maxlength="11" placeholder="下单用，11 位真实手机号">
-    </div>
     <div class="row" style="margin-top:10px">
       <button id="qrBtn">生成登录二维码</button>
       <button id="refreshBtn" class="ghost">刷新账号</button>
@@ -501,8 +499,13 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
     <div id="buyers" style="margin-top:8px"></div>
     <div id="addr" style="margin-top:8px"></div>
     <div class="row" style="margin-top:8px">
+      <label class="muted">联系人手机号</label>
+      <input id="phoneInput" type="tel" inputmode="numeric" maxlength="11" placeholder="下单用，11 位真实手机号">
+    </div>
+    <div class="row" style="margin-top:8px">
       <button id="buildBtn">生成配置</button>
     </div>
+    <div id="buildMsg" class="muted" style="margin-top:6px"></div>
   </section>
 
   <section class="card">
@@ -715,14 +718,15 @@ $('searchBtn').onclick = async () => {
 };
 
 $('buildBtn').onclick = async () => {
-  if (!purchaseContext) { alert('先拉取票档'); return; }
+  if (!purchaseContext) { $('buildMsg').textContent = '请先拉取票档'; return; }
   const ticketEl = document.querySelector('input[name=ticket]:checked');
   const addrEl = document.querySelector('input[name=addr]:checked');
   const buyerEls = Array.from(document.querySelectorAll('input.buyer:checked'));
-  if (!ticketEl) { alert('选一个票档'); return; }
-  if (!buyerEls.length) { alert('选至少一个购票人'); return; }
-  if (!addrEl) { alert('选一个地址'); return; }
+  if (!ticketEl) { $('buildMsg').textContent = '请选择一个票档'; return; }
+  if (!buyerEls.length) { $('buildMsg').textContent = '请至少选择一个购票人'; return; }
+  if (!addrEl) { $('buildMsg').textContent = '请选择一个地址'; return; }
   const firstBuyer = (purchaseContext.buyers || [])[parseInt(buyerEls[0].value, 10)] || {};
+  $('buildMsg').textContent = '生成中…';
   const r = await api('/api/build', {context: purchaseContext, selection: {
     ticket_index: parseInt(ticketEl.value, 10),
     buyer_indices: buyerEls.map(e => parseInt(e.value, 10)),
@@ -730,9 +734,9 @@ $('buildBtn').onclick = async () => {
     buyer: firstBuyer.name || '',
     phone: $('phoneInput').value.trim()
   }});
-  if (!r.ok) { alert(r.error || '生成失败'); return; }
+  if (!r.ok) { $('buildMsg').innerHTML = '<span class="err">' + (r.error || '生成失败') + '</span>'; return; }
   $('configText').value = JSON.stringify(r.config, null, 2);
-  alert('配置已生成，检查后点开始抢票');
+  $('buildMsg').innerHTML = '<span class="ok">配置已生成，已填入下方 JSON</span>';
 };
 
 setInterval(refreshStatus, 2000);
