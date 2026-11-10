@@ -153,6 +153,13 @@ def _run_one(name, payload, interval, time_start):
         _log(traceback.format_exc(limit=3))
 
 
+def _phone_value():
+    try:
+        return str(_cookie_manager().get_config_value("phone", "") or "")
+    except Exception:
+        return ""
+
+
 def _resolve_project_input(text):
     """Accept a bare id, a detail URL, or a b23.tv short link."""
     text = str(text or "").strip()
@@ -234,6 +241,16 @@ def _build_config(body):
         return {"ok": False, "error": "缺少项目上下文"}
     if not isinstance(selection, dict):
         return {"ok": False, "error": "缺少选择参数"}
+    phone = str(body.get("phone") or "").strip()
+    if not re.fullmatch(r"1\d{10}", phone):
+        return {"ok": False, "error": "请填写正确的 11 位联系人手机号"}
+    selection = dict(selection)
+    selection["tel"] = phone
+    selection["phone"] = phone
+    try:
+        _cookie_manager().set_config_value("phone", phone)
+    except Exception:
+        pass
     config = build_ticket_config_from_selection(context, selection)
     return {"ok": True, "config": config}
 
@@ -253,6 +270,10 @@ def _start_tasks(body):
     interval = max(10, min(5000, interval))
     time_start = (body.get("time_start") or "").strip()
     multi = bool(body.get("multi_account"))
+
+    tel = str(payload.get("tel") or payload.get("phone") or "")
+    if "*" in tel or (tel and not re.fullmatch(r"1\d{10}", tel)):
+        return {"ok": False, "error": "配置里的联系人手机号无效（买家手机号是打码的），请重新生成配置并填真实手机号"}
 
     tasks = []
     accounts = _accounts() if multi else []
@@ -326,6 +347,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({
                 "ok": True,
                 "login": login,
+                "phone": _phone_value(),
                 "accounts": [{"name": a.name, "uid": a.uid} for a in _accounts()],
                 **{k: state[k] for k in ("running", "stage", "order_id", "payment_url", "finished")},
             })
@@ -448,6 +470,10 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
   <section class="card">
     <h2>账号</h2>
     <div id="loginState" class="muted">检查中…</div>
+    <div class="row" style="margin-top:8px">
+      <label class="muted">联系人手机号</label>
+      <input id="phoneInput" type="tel" inputmode="numeric" maxlength="11" placeholder="下单用，11 位真实手机号">
+    </div>
     <div class="row" style="margin-top:10px">
       <button id="qrBtn">生成登录二维码</button>
       <button id="refreshBtn" class="ghost">刷新账号</button>
@@ -536,6 +562,7 @@ async function refreshStatus() {
     $('loginState').innerHTML = login.logged_in
       ? '<span class="ok">已登录：' + (login.username || '') + '</span>'
       : '<span class="err">未登录</span>';
+    if (!$('phoneInput').value && s.phone) $('phoneInput').value = s.phone;
     $('accounts').textContent = (s.accounts || []).map(a => a.name).join(' / ') || '暂无已保存账号';
     $('runState').textContent = s.running
       ? ('运行中 · ' + (s.stage || '') + (s.order_id ? (' · 订单 ' + s.order_id) : ''))
@@ -701,8 +728,7 @@ $('buildBtn').onclick = async () => {
     buyer_indices: buyerEls.map(e => parseInt(e.value, 10)),
     address_index: parseInt(addrEl.value, 10),
     buyer: firstBuyer.name || '',
-    tel: firstBuyer.tel || purchaseContext.phone || '',
-    phone: purchaseContext.phone || ''
+    phone: $('phoneInput').value.trim()
   }});
   if (!r.ok) { alert(r.error || '生成失败'); return; }
   $('configText').value = JSON.stringify(r.config, null, 2);
