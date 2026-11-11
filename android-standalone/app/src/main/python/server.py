@@ -153,6 +153,60 @@ def _run_one(name, payload, interval, time_start):
         _log(traceback.format_exc(limit=3))
 
 
+def _presets_dir():
+    path = os.path.join(HOME, "presets")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _preset_path(name):
+    safe = re.sub(r"[^\w\u4e00-\u9fff.-]", "_", str(name or "").strip())[:40]
+    return os.path.join(_presets_dir(), safe + ".json") if safe else ""
+
+
+def _list_presets():
+    items = []
+    for filename in sorted(os.listdir(_presets_dir())):
+        if filename.endswith(".json"):
+            items.append(filename[:-5])
+    return {"ok": True, "items": items}
+
+
+def _save_preset(body):
+    name = str(body.get("name") or "").strip()
+    path = _preset_path(name)
+    if not path:
+        return {"ok": False, "error": "方案名不能为空"}
+    payload = {
+        "name": name,
+        "config_text": body.get("config_text") or "",
+        "time_start": body.get("time_start") or "",
+        "interval": body.get("interval") or 500,
+        "project_id": body.get("project_id") or "",
+        "project_name": body.get("project_name") or "",
+    }
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    _log(f"已保存方案：{name}")
+    return {"ok": True, "name": name}
+
+
+def _load_preset(body):
+    path = _preset_path(body.get("name"))
+    if not path or not os.path.exists(path):
+        return {"ok": False, "error": "方案不存在"}
+    with open(path, "r", encoding="utf-8") as handle:
+        return {"ok": True, "preset": json.load(handle)}
+
+
+def _delete_preset(body):
+    path = _preset_path(body.get("name"))
+    if path and os.path.exists(path):
+        os.remove(path)
+        return {"ok": True}
+    return {"ok": False, "error": "方案不存在"}
+
+
 def _phone_value():
     try:
         return str(_cookie_manager().get_config_value("phone", "") or "")
@@ -354,6 +408,9 @@ class Handler(BaseHTTPRequestHandler):
                 **{k: state[k] for k in ("running", "stage", "order_id", "payment_url", "finished")},
             })
             return
+        if parsed.path == "/api/presets":
+            self._json(_list_presets())
+            return
         if parsed.path == "/api/logs":
             query = parse_qs(parsed.query)
             after = int((query.get("after") or ["0"])[0])
@@ -380,6 +437,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_search_projects(body))
             elif parsed.path == "/api/resolve":
                 self._json(_resolve_only(body))
+            elif parsed.path == "/api/presets":
+                self._json(_list_presets() if self.command == "GET" else _save_preset(body))
+            elif parsed.path == "/api/presets/save":
+                self._json(_save_preset(body))
+            elif parsed.path == "/api/presets/load":
+                self._json(_load_preset(body))
+            elif parsed.path == "/api/presets/delete":
+                self._json(_delete_preset(body))
             elif parsed.path == "/api/build":
                 self._json(_build_config(body))
             elif parsed.path == "/api/stop":
@@ -528,6 +593,15 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
     <div class="muted" style="margin:8px 0 6px">抢票配置 JSON（生成配置后粘贴/导入的内容）</div>
     <textarea id="configText" placeholder='{"screen_id": ..., "sku_id": ..., "buyer_info": [...], ...}'></textarea>
     <div class="muted" style="margin-top:6px">配置里的 pay_money 单位是“分”，6800 = ¥68.00，属正常</div>
+    <div class="row" style="margin-top:10px">
+      <input id="presetName" placeholder="方案名，如 BW2027-D1">
+      <button id="savePreset">保存方案</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <select id="presetSelect" style="flex:1;background:#121212;color:#eee;border:1px solid #333;border-radius:8px;padding:8px"></select>
+      <button id="loadPreset" class="ghost">载入</button>
+      <button id="delPreset" class="ghost">删除</button>
+    </div>
     <div class="row" style="margin-top:8px">
       <input id="file" type="file" accept=".json,application/json" style="border:0;padding:0">
     </div>
@@ -620,6 +694,61 @@ $('file').onchange = (e) => {
   const reader = new FileReader();
   reader.onload = () => { $('configText').value = reader.result; };
   reader.readAsText(f);
+};
+
+async function refreshPresets() {
+  try {
+    const r = await api('/api/presets');
+    if (!r.ok) return;
+    const names = r.items || [];
+    $('presetSelect').innerHTML = names.length
+      ? names.map(n => '<option value="' + n + '">' + n + '</option>').join('')
+      : '<option value="">（暂无方案）</option>';
+  } catch (e) {}
+}
+
+$('savePreset').onclick = async () => {
+  const name = ($('presetName').value || '').trim();
+  if (!name) { $('buildMsg').textContent = '先填方案名'; return; }
+  const r = await api('/api/presets/save', {
+    name: name,
+    config_text: $('configText').value,
+    time_start: combinedTimeStart(),
+    interval: parseInt($('interval').value || '500', 10),
+    project_id: purchaseContext ? (purchaseContext.project_id || '') : '',
+    project_name: purchaseContext ? (purchaseContext.project_name || '') : ''
+  });
+  if (!r.ok) { $('buildMsg').textContent = r.error || '保存失败'; return; }
+  $('buildMsg').textContent = '方案已保存：' + name;
+  refreshPresets();
+};
+
+$('loadPreset').onclick = async () => {
+  const name = $('presetSelect').value;
+  if (!name) return;
+  const r = await api('/api/presets/load', {name: name});
+  if (!r.ok) { $('buildMsg').textContent = r.error || '载入失败'; return; }
+  const p = r.preset || {};
+  $('configText').value = p.config_text || '';
+  $('interval').value = p.interval || 500;
+  $('presetName').value = p.name || name;
+  const ts = String(p.time_start || '');
+  const m = ts.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::(\d{2}))?/);
+  if (m) {
+    $('dateStart').value = m[1];
+    $('timeStart').value = m[2] + ':' + (m[3] || '00');
+  }
+  if (p.project_id) $('project').value = p.project_id;
+  $('buildMsg').textContent = '已载入方案：' + name;
+};
+
+$('delPreset').onclick = async () => {
+  const name = $('presetSelect').value;
+  if (!name) return;
+  if (!confirm('删除方案 ' + name + '？')) return;
+  const r = await api('/api/presets/delete', {name: name});
+  $('buildMsg').textContent = r.ok ? ('已删除：' + name) : (r.error || '删除失败');
+  refreshPresets();
 };
 
 function combinedTimeStart() {
@@ -741,7 +870,7 @@ $('buildBtn').onclick = async () => {
 
 setInterval(refreshStatus, 2000);
 setInterval(refreshLogs, 1000);
-refreshStatus(); refreshLogs();
+refreshStatus(); refreshLogs(); refreshPresets();
 </script>
 </body>
 </html>
