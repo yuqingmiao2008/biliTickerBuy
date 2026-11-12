@@ -20,4 +20,6 @@ android {
 
 dependencies {
     compileOnly files('libs/api-82.jar')
+    compileOnly "io.github.libxposed:api:102.0.0"
+    compileOnly "androidx.annotation:annotation:1.7.1"
 }
