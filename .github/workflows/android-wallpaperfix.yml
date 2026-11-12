@@ -1,0 +1,72 @@
+name: Build Wallpaper Fix APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/mobile-interval-multiaccount
+    paths:
+      - 'android-wallpaperfix/**'
+      - '.github/workflows/android-wallpaperfix.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          TOOLS="$(ls -d "$SDK"/cmdline-tools/*/bin | tail -1)"
+          echo "$TOOLS" >> "$GITHUB_PATH"
+          yes | "$TOOLS/sdkmanager" --licenses >/dev/null || true
+          "$TOOLS/sdkmanager" "platform-tools" "platforms;android-34" "build-tools;34.0.0" >/dev/null
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build APK
+        working-directory: android-wallpaperfix
+        run: gradle assembleDebug --no-daemon
+
+      - name: Sign APK
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APK_IN="android-wallpaperfix/app/build/outputs/apk/debug/app-debug.apk"
+          echo "$KEYSTORE_B64" | base64 -d > /tmp/keystore.p12
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          "$BT/zipalign" -f -p 4 "$APK_IN" /tmp/aligned.apk
+          "$BT/apksigner" sign --ks /tmp/keystore.p12 \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --out dist/wallpaperfix.apk /tmp/aligned.apk
+          rm -f /tmp/keystore.p12
+          sha256sum dist/wallpaperfix.apk > dist/wallpaperfix.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: wallpaperfix-apk
+          path: |
+            dist/wallpaperfix.apk
+            dist/wallpaperfix.apk.sha256
