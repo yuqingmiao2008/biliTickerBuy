@@ -89,7 +89,7 @@ public class Hook implements IXposedHookLoadPackage {
         String line = new SimpleDateFormat("MM-dd HH:mm:ss").format(new Date()) + " " + message;
         XposedBridge.log("WallHook: " + message);
         try {
-            File file = new File(Environment.getExternalStorageDirectory(), "Download/wallhook.log");
+            File file = new File("/data/data/com.miui.gallery/files/wallhook.log");
             FileWriter writer = new FileWriter(file, true);
             writer.write(line);
             writer.write("\n");
