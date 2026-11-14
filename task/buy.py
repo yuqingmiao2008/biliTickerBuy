@@ -18,6 +18,7 @@ from requests import HTTPError, RequestException
 from cptoken import (
     generate_browser_window_state,
     init_ctoken_state,
+    normalize_browser_window_state,
 )
 
 from app_cmd.config.BuyConfig import BuyConfig
@@ -497,7 +498,7 @@ def buy_stream(config: BuyConfig):
     proxy_backoff = ProxyBackoff(max_seconds=config.proxy_backoff_max_seconds)
     is_hot_project = bool(tickets_info.get("is_hot_project", False))
     # use_local_token = bool(config.use_local_token)
-    browser_window_state = generate_browser_window_state()
+    browser_window_state = normalize_browser_window_state(config.browser_state) or generate_browser_window_state()
     token_payload = _build_token_payload(tickets_info)
     request_interval = max(10, min(5000, int(config.interval or 1000)))
     effective_retry_limit = max(1, int(config.create_retry_limit))
@@ -634,6 +635,8 @@ def buy_stream(config: BuyConfig):
                 ),
                 user_agent_length=len(_request.get_user_agent()),
                 ticket_collection_t=ticket_collection_t,
+                touchend=getattr(config, "touchend", 0) or 0,
+                visibilitychange=getattr(config, "visibilitychange", 0) or 0,
             )
             # if is_hot_project:
             # hot

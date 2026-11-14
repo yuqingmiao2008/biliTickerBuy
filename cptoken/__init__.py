@@ -278,6 +278,21 @@ class CTokenRuntimeState:
         return self.snapshot(now_ms=now_ms).kwargs()
 
 
+def normalize_browser_window_state(raw: dict | None) -> BrowserWindowState | None:
+    if not isinstance(raw, dict):
+        return None
+    keys = (
+        "scrollX", "scrollY", "innerWidth", "innerHeight", "outerWidth",
+        "outerHeight", "screenX", "screenY", "screenWidth", "screenHeight",
+        "screenAvailWidth",
+    )
+    try:
+        values = {key: int(raw[key]) for key in keys}
+    except (KeyError, TypeError, ValueError):
+        return None
+    return BrowserWindowState(**values)
+
+
 def init_ctoken_state(
     browser_window_state: BrowserWindowState | None = None,
     history_length: int = random.randint(2, 10),
@@ -285,6 +300,8 @@ def init_ctoken_state(
     href_length: int = 76,
     device_pixel_ratio: float = 4.0,
     ticket_collection_t: int = 0,
+    touchend: int = 0,
+    visibilitychange: int = 0,
 ) -> CTokenRuntimeState:
     if browser_window_state is None:
         browser_window_state = generate_browser_window_state()
@@ -313,9 +330,9 @@ def init_ctoken_state(
 
     state = CTokenRuntimeState(
         m1=derive_d(1),
-        touchend=0,
+        touchend=max(0, min(255, int(touchend))),
         m2=derive_d(2),
-        visibilitychange=0,
+        visibilitychange=max(0, min(255, int(visibilitychange))),
         m3=derive_d(3),
         m4=derive_d(4),
         openWindow=random.randint(1, 3),
@@ -372,5 +389,6 @@ __all__ = [
     "generate_ctoken",
     "generate_browser_window_state",
     "init_ctoken_state",
+    "normalize_browser_window_state",
     "sim_ctoken_state",
 ]

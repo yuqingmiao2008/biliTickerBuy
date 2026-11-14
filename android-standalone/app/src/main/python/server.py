@@ -112,17 +112,23 @@ def _poll_qr(key):
     return result
 
 
-def _run_one(name, payload, interval, time_start):
+def _run_one(name, payload, interval, time_start, browser=None):
     BuyConfig = _imports["BuyConfig"]
     buy_stream = _imports["buy_stream"]
 
+    browser = browser if isinstance(browser, dict) else {}
     config = BuyConfig(
         tickets_info=json.dumps(payload, ensure_ascii=False),
         time_start=time_start or "",
         interval=int(interval),
         show_qrcode=False,
         auto_open_payment_url=False,
+        browser_state=browser.get("state"),
+        touchend=int(browser.get("touchend") or 0),
+        visibilitychange=int(browser.get("visibilitychange") or 0),
     )
+    if browser.get("state"):
+        _log(f"[{name}] 已使用 WebView 真实浏览器指纹生成 ctoken")
     _log(f"[{name}] 任务启动，间隔 {interval}ms，开抢时间 {time_start or '立即'}")
     try:
         for event in buy_stream(config):
@@ -326,6 +332,7 @@ def _start_tasks(body):
     interval = max(10, min(5000, interval))
     time_start = (body.get("time_start") or "").strip()
     multi = bool(body.get("multi_account"))
+    browser = body.get("browser") if isinstance(body.get("browser"), dict) else {}
 
     tel = str(payload.get("tel") or payload.get("phone") or "")
     if "*" in tel or (tel and not re.fullmatch(r"1\d{10}", tel)):
@@ -339,7 +346,7 @@ def _start_tasks(body):
             item["cookies"] = account.cookies
             detail = str(item.get("detail") or "").strip()
             item["detail"] = f"{detail}-{account.name}" if detail else account.name
-            tasks.append((account.name, item))
+            tasks.append((account.name, item, browser))
     else:
         cookies = _current_cookies()
         if cookies:
@@ -347,7 +354,7 @@ def _start_tasks(body):
         elif "cookies" not in payload:
             _set(running=False)
             return {"ok": False, "error": "未登录且配置里没有 cookies，请先扫码登录"}
-        tasks.append(("当前账号", payload))
+        tasks.append(("当前账号", payload, browser))
 
     _stop_flag["stop"] = False
     _set(running=True, finished=None, stage="启动中", order_id=None, payment_url=None)
@@ -355,15 +362,43 @@ def _start_tasks(body):
 
     def runner():
         try:
-            for name, item in tasks:
+            for name, item, browser_info in tasks:
                 if _stop_flag["stop"]:
                     break
-                _run_one(name, item, interval, time_start)
+                _run_one(name, item, interval, time_start, browser_info)
         finally:
             _set(running=False)
 
     threading.Thread(target=runner, daemon=True).start()
-    return {"ok": True, "tasks": [name for name, _ in tasks]}
+    return {"ok": True, "tasks": [task[0] for task in tasks]}
+
+
+def _fingerprint_preview(body):
+    try:
+        from cptoken import init_ctoken_state, normalize_browser_window_state
+    except Exception as exc:
+        return {"ok": False, "error": f"cptoken 不可用：{exc}"}
+    raw_state = body.get("state") or body.get("browser_state") or body
+    state = normalize_browser_window_state(raw_state)
+    if not state:
+        return {"ok": False, "error": "浏览器指纹字段不完整"}
+    try:
+        runtime = init_ctoken_state(
+            browser_window_state=state,
+            history_length=int(body.get("history_length") or 2),
+            user_agent_length=int(body.get("user_agent_length") or 140),
+            href_length=int(body.get("href_length") or 76),
+            device_pixel_ratio=float(body.get("device_pixel_ratio") or 1),
+            ticket_collection_t=int(time.time() * 1000),
+            touchend=int(body.get("touchend") or 0),
+            visibilitychange=int(body.get("visibilitychange") or 0),
+        )
+        ctoken = runtime.snapshot().generate_prepare_ctoken()
+        _log(f"指纹预览：ctoken 长度 {len(ctoken)}，前缀 {ctoken[:16]}…")
+        return {"ok": True, "ctoken": ctoken, "length": len(ctoken), "state": state}
+    except Exception as exc:
+        _log(f"指纹预览失败：{exc!r}")
+        return {"ok": False, "error": repr(exc)}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -429,6 +464,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_start_qr())
             elif parsed.path == "/api/login/poll":
                 self._json(_poll_qr(body.get("key") or ""))
+            elif parsed.path == "/api/fingerprint":
+                self._json(_fingerprint_preview(body))
             elif parsed.path == "/api/start":
                 self._json(_start_tasks(body))
             elif parsed.path == "/api/project":
@@ -771,14 +808,50 @@ $('useSaleBtn').onclick = () => {
   $('timeStart').value = match[4] + ':' + match[5] + ':' + (match[6] || '00');
 };
 
+const btbOpenedAt = Date.now();
+let btbTouches = 0;
+let btbVisibility = 0;
+window.addEventListener('pointerup', () => { btbTouches = Math.min(255, btbTouches + 1); }, { passive: true });
+document.addEventListener('visibilitychange', () => { btbVisibility = Math.min(255, btbVisibility + 1); });
+
+function browserFingerprint() {
+  const width = Math.round(window.innerWidth || 0);
+  const height = Math.round(window.innerHeight || 0);
+  return {
+    state: {
+      scrollX: Math.round(window.scrollX || 0),
+      scrollY: Math.round(window.scrollY || 0),
+      innerWidth: width,
+      innerHeight: height,
+      outerWidth: Math.round(window.outerWidth || width),
+      outerHeight: Math.round(window.outerHeight || height),
+      screenX: Math.round(window.screenX || 0),
+      screenY: Math.round(window.screenY || 0),
+      screenWidth: Math.round(screen.width || width),
+      screenHeight: Math.round(screen.height || height),
+      screenAvailWidth: Math.round(screen.availWidth || screen.width || width)
+    },
+    history_length: history.length,
+    user_agent_length: navigator.userAgent.length,
+    device_pixel_ratio: window.devicePixelRatio || 1,
+    touchend: btbTouches,
+    visibilitychange: btbVisibility,
+    elapsed_seconds: Math.min(65535, Math.floor((Date.now() - btbOpenedAt) / 1000))
+  };
+}
+
 $('startBtn').onclick = async () => {
   const text = $('configText').value.trim();
   if (!text) { alert('先填入抢票配置 JSON'); return; }
+  const browser = browserFingerprint();
+  const check = await api('/api/fingerprint', browser);
+  if (!check.ok) { alert('浏览器指纹采集失败：' + (check.error || '未知错误')); return; }
   const r = await api('/api/start', {
     config_text: text,
     interval: parseInt($('interval').value || '500', 10),
     time_start: combinedTimeStart(),
-    multi_account: $('multi').checked
+    multi_account: $('multi').checked,
+    browser: browser
   });
   if (!r.ok) alert(r.error || '启动失败');
   refreshStatus();

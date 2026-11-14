@@ -345,6 +345,26 @@ CREATE_ORDER_TERMINAL_RULES: dict[int, CreateOrderTerminalRule] = {
         status="completed",
         message="有重复订单，停止重试",
     ),
+    -101: CreateOrderTerminalRule(
+        status="failed",
+        message="未登录或登录状态失效，请重新扫码登录后重试",
+    ),
+    -111: CreateOrderTerminalRule(
+        status="failed",
+        message="csrf 校验失败（bili_jct 失效），请重新登录后重试",
+    ),
+    -352: CreateOrderTerminalRule(
+        status="failed",
+        message="触发 B 站风控校验，已停止；请更换网络或稍后再试",
+    ),
+    100044: CreateOrderTerminalRule(
+        status="failed",
+        message="需要完成人机验证，请先在官方 App/网页完成验证再重试",
+    ),
+    100039: CreateOrderTerminalRule(
+        status="completed",
+        message="活动已结束（收摊），停止重试",
+    ),
 }
 
 

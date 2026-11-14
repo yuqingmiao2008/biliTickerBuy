@@ -290,6 +290,15 @@ class BuyConfig(BasicConfig):
     )
     """Retention period for generated log files, in days."""
 
+    browser_state: dict | None = None
+    """Real browser window metrics captured by the WebView for ctoken."""
+
+    touchend: int = 0
+    """Touch count captured by the WebView."""
+
+    visibilitychange: int = 0
+    """Visibility-change count captured by the WebView."""
+
     @classmethod
     def from_runtime_options(
         cls,
