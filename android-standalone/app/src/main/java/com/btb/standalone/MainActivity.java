@@ -24,6 +24,8 @@ import com.chaquo.python.android.AndroidPlatform;
 public class MainActivity extends Activity {
 
     private static final int PORT = 7861;
+    private static final Object START_LOCK = new Object();
+    private static volatile int SERVER_PORT = 0;
     private String baseUrl = "http://127.0.0.1:" + PORT + "/";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -73,8 +75,14 @@ public class MainActivity extends Activity {
                     Python.start(new AndroidPlatform(this));
                 }
                 PyObject server = Python.getInstance().getModule("server");
-                int port = Integer.parseInt(String.valueOf(server.callAttr(
-                        "start", getFilesDir().getAbsolutePath(), PORT)));
+                int port;
+                synchronized (START_LOCK) {
+                    if (SERVER_PORT == 0) {
+                        SERVER_PORT = Integer.parseInt(String.valueOf(server.callAttr(
+                                "start", getFilesDir().getAbsolutePath(), PORT)));
+                    }
+                    port = SERVER_PORT;
+                }
                 baseUrl = "http://127.0.0.1:" + port + "/";
                 for (int i = 0; i < 60; i++) {
                     if (isUp(baseUrl)) {

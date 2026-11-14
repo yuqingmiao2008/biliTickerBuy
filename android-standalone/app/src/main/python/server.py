@@ -18,6 +18,7 @@ HOME = ""
 PORT = 7861
 _service = None
 _service_port = None
+_service_lock = threading.Lock()
 
 _logs = []
 _lock = threading.Lock()
@@ -678,10 +679,27 @@ def _service_alive(port):
         return False
 
 
+def _startup_note(message):
+    try:
+        path = os.path.join(HOME, "logs", "server_start.log")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(time.strftime("%Y-%m-%d %H:%M:%S ") + str(message) + "\n")
+    except Exception:
+        pass
+
+
 def start(home, port=7861):
+    with _service_lock:
+        return _start_impl(home, port)
+
+
+def _start_impl(home, port=7861):
     global HOME, PORT, _service, _service_port
+    _startup_note(f"start() called, port={port}, service={_service_port}")
     if _service is not None:
         _log(f"本地服务已在运行，端口 {_service_port}")
+        _startup_note(f"reuse running service on {_service_port}")
         return _service_port
     HOME = home
     PORT = int(port)
@@ -716,6 +734,7 @@ def start(home, port=7861):
             server = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
         except OSError as exc:
             last_error = exc
+            _startup_note(f"bind {candidate} failed: {exc}")
             if candidate == PORT and _service_alive(candidate):
                 _log(f"端口 {candidate} 已有本程序服务在运行，直接复用")
                 _service_port = candidate
@@ -727,6 +746,7 @@ def start(home, port=7861):
         PORT = candidate
         threading.Thread(target=server.serve_forever, daemon=True).start()
         _log(f"本地服务已启动，端口 {candidate}")
+        _startup_note(f"listening on {candidate}")
         return candidate
     raise OSError(f"无法绑定本地端口 {PORT}-{PORT + 7}: {last_error}")
 
