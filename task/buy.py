@@ -504,6 +504,7 @@ def buy_stream(config: BuyConfig):
     effective_retry_limit = max(1, int(config.create_retry_limit))
     effective_batch_size = max(1, int(config.create_request_batch_size))
     rate_limit_delay_ms = max(0, int(config.rate_limit_delay_ms))
+    rate_limit_streak = 0
     wait_for_buy_button = bool(config.wait_for_buy_button)
     page_status_check = None
     page_check_before_seconds = max(0, int(config.buy_page_check_before_seconds))
@@ -720,6 +721,7 @@ def buy_stream(config: BuyConfig):
                         yield emit("status", "抢票结束")
                         break
                     should_sleep_before_next_attempt = False
+                    attempt_errno = -1
                     try:
                         create_response = _request.post(
                             url=url,
@@ -729,6 +731,8 @@ def buy_stream(config: BuyConfig):
                         ret = create_response.json()
                         proxy_backoff.reset()
                         err = int(ret.get("errno", ret.get("code")))
+                        attempt_errno = err
+                        rate_limit_streak = 0
                         retry_outcome.set_response(err, ret)
                         _request.handle_100001(err)
                         if _is_create_success(ret, err):
@@ -792,20 +796,19 @@ def buy_stream(config: BuyConfig):
                             retry_outcome.set_exception(exc)
                     except BiliRateLimitError as e:
                         retry_outcome.set_exception(e)
+                        rate_limit_streak += 1
+                        base_delay = rate_limit_delay_ms if rate_limit_delay_ms > 0 else 300
+                        delay_ms = min(base_delay * (2 ** min(rate_limit_streak - 1, 4)), 5000)
+                        delay_seconds = max(0.05, random.uniform(delay_ms * 0.85, delay_ms * 1.15) / 1000)
                         yield emit(
                             "attempt",
-                            (
-                                f"{e}，延迟 {rate_limit_delay_ms}ms 后继续"
-                                if rate_limit_delay_ms > 0
-                                else str(e)
-                            ),
+                            f"{e}，429 连续第 {rate_limit_streak} 次，等待 {delay_seconds:.2f}s 后继续",
                             BuyStreamUpdate(
                                 attempt_current=attempt,
                                 attempt_total=effective_retry_limit,
                             ),
                         )
-                        if rate_limit_delay_ms > 0:
-                            time.sleep(rate_limit_delay_ms / 1000)
+                        time.sleep(delay_seconds)
                         continue  # 不需要sleep
                     except RequestException as e:
                         retry_outcome.set_exception(e)
@@ -852,7 +855,28 @@ def buy_stream(config: BuyConfig):
                                 logger.warning(f"循环内项目详情复检失败（忽略）：{exc}")
                             _reset_refresh_counter()
                     if should_sleep_before_next_attempt:
-                        time.sleep(max(0.01, random.uniform(request_interval * 0.8, request_interval * 1.2) / 1000))
+                        sleep_seconds = random.uniform(request_interval * 0.8, request_interval * 1.2) / 1000
+                        if attempt_errno in (900001, 900002):
+                            sleep_seconds = max(1.0, sleep_seconds)
+                            yield emit(
+                                "attempt",
+                                f"[{attempt_errno}] 1 秒盾/限流，按 1s 节奏等待后重试",
+                                BuyStreamUpdate(
+                                    attempt_current=attempt,
+                                    attempt_total=effective_retry_limit,
+                                ),
+                            )
+                        elif attempt_errno in (219, 221):
+                            sleep_seconds = 5.0
+                            yield emit(
+                                "attempt",
+                                f"[{attempt_errno}] 5 秒盾，等待 5s 后重试",
+                                BuyStreamUpdate(
+                                    attempt_current=attempt,
+                                    attempt_total=effective_retry_limit,
+                                ),
+                            )
+                        time.sleep(max(0.01, sleep_seconds))
 
                 if (
                     result is not None

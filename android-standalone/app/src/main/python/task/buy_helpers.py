@@ -365,6 +365,10 @@ CREATE_ORDER_TERMINAL_RULES: dict[int, CreateOrderTerminalRule] = {
         status="completed",
         message="活动已结束（收摊），停止重试",
     ),
+    100041: CreateOrderTerminalRule(
+        status="failed",
+        message="未开售就请求（100041），账号会员购可能被临时封禁；请填写开抢时间后重新启动",
+    ),
 }
 
 
