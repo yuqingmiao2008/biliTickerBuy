@@ -412,6 +412,8 @@ def _fingerprint_preview(body):
 
 def _monitor_ticket_available(ticket):
     status = str(ticket.get("sale_status") or "")
+    if status in {"售罄", "暂时售罄", "不可售", "停售", "不可用", "未开始", "已结束", "未完成", "下架", "已取消", "不在白名单"}:
+        return False
     try:
         flag = int(ticket.get("sale_flag_number"))
     except (TypeError, ValueError):
