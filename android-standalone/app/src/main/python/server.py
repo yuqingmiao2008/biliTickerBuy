@@ -6,6 +6,7 @@ BTB_HOME is set before util/__init__.py initialises its paths.
 
 import json
 import os
+import random
 import re
 import threading
 import time
@@ -27,6 +28,14 @@ _state = {
     "finished": None,
 }
 _stop_flag = {"stop": False}
+_monitor = {
+    "running": False,
+    "stop": False,
+    "last": "",
+    "hits": 0,
+    "interval": 3000,
+    "auto_buy": True,
+}
 
 _imports = {}
 
@@ -401,6 +410,146 @@ def _fingerprint_preview(body):
         return {"ok": False, "error": repr(exc)}
 
 
+def _monitor_ticket_available(ticket):
+    status = str(ticket.get("sale_status") or "")
+    try:
+        flag = int(ticket.get("sale_flag_number"))
+    except (TypeError, ValueError):
+        flag = None
+    if flag in {1, 3, 4, 5, 8, 9, 101, 102, 103, 105, 106}:
+        return False
+    if flag in {2, 6}:
+        return True
+    if ticket.get("clickable") is True:
+        return True
+    return status in {"可购买", "库存紧张"}
+
+
+def _monitor_sale_started(ticket):
+    raw = str(ticket.get("sale_start") or "").strip()
+    match = re.match(r"(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?", raw)
+    if not match:
+        return True
+    try:
+        start = time.mktime(
+            (
+                int(match.group(1)),
+                int(match.group(2)),
+                int(match.group(3)),
+                int(match.group(4)),
+                int(match.group(5)),
+                int(match.group(6) or 0),
+                0,
+                0,
+                -1,
+            )
+        )
+    except (TypeError, ValueError, OverflowError):
+        return True
+    return time.time() + 3 >= start
+
+
+def _monitor_loop(config_text, interval_ms, auto_buy):
+    try:
+        payload = json.loads(config_text)
+        project_id = int(payload["project_id"])
+        sku_id = int(payload["sku_id"])
+    except Exception as exc:
+        _log(f"回流监控启动失败：配置无效（{exc}）")
+        _monitor["running"] = False
+        _monitor["last"] = "配置无效"
+        return
+    sale_start = str(payload.get("sale_start") or "")
+    date = sale_start[:10] if re.match(r"\d{4}-\d{2}-\d{2}", sale_start) else None
+    _log(f"回流监控启动：项目 {project_id}，SKU {sku_id}，间隔 {interval_ms}ms，自动开抢={auto_buy}")
+    last_status = None
+    while not _monitor["stop"]:
+        try:
+            from interface.project import _fetch_ticket_options, _make_request, fetch_project_payload
+
+            request = _make_request(cookies_path=_cookies_path())
+            project_payload = fetch_project_payload(request=request, project_id=project_id)
+            options = _fetch_ticket_options(
+                request=request,
+                project_payload=project_payload,
+                selected_date=date,
+            )
+            target = next(
+                (item for item in options if str(item.get("id")) == str(sku_id)),
+                None,
+            )
+            if target is None:
+                _monitor["last"] = f"未找到 SKU {sku_id}（可能已下架或日期不匹配）"
+            else:
+                status = str(target.get("sale_status") or "未知状态")
+                _monitor["last"] = f"{status} | {target.get('desc') or ''}"
+                if status != last_status:
+                    _log(f"回流监控：SKU {sku_id} 当前状态 {status}")
+                    last_status = status
+                if _monitor_ticket_available(target) and _monitor_sale_started(target):
+                    _monitor["hits"] += 1
+                    _log(f"发现可购余票：{status} | {target.get('desc') or ''}")
+                    _monitor["stop"] = True
+                    if auto_buy:
+                        _log("回流监控触发自动开抢…")
+                        result = _start_tasks(
+                            {
+                                "config_text": config_text,
+                                "interval": interval_ms,
+                                "time_start": "",
+                                "multi_account": False,
+                            }
+                        )
+                        _log(f"自动开抢结果：{result}")
+                    break
+        except Exception as exc:
+            _monitor["last"] = f"监控异常：{exc}"
+            _log(f"回流监控异常：{exc}")
+        sleep_seconds = max(0.5, interval_ms / 1000 * random.uniform(0.8, 1.2))
+        end = time.time() + sleep_seconds
+        while time.time() < end and not _monitor["stop"]:
+            time.sleep(min(0.5, end - time.time()))
+    _monitor["running"] = False
+    _log("回流监控已停止")
+
+
+def _monitor_start(body):
+    if _monitor["running"]:
+        return {"ok": False, "error": "监控已在运行"}
+    config_text = str(body.get("config_text") or "").strip()
+    if not config_text:
+        return {"ok": False, "error": "先填入抢票配置 JSON"}
+    try:
+        payload = json.loads(config_text)
+        int(payload["project_id"])
+        int(payload["sku_id"])
+    except Exception as exc:
+        return {"ok": False, "error": f"配置缺少 project_id / sku_id：{exc}"}
+    interval_ms = max(1000, min(10000, int(body.get("interval") or 3000)))
+    auto_buy = bool(body.get("auto_buy", True))
+    _monitor.update(
+        running=True,
+        stop=False,
+        last="启动中",
+        hits=0,
+        interval=interval_ms,
+        auto_buy=auto_buy,
+    )
+    threading.Thread(
+        target=_monitor_loop,
+        args=(config_text, interval_ms, auto_buy),
+        daemon=True,
+    ).start()
+    return {"ok": True, "interval": interval_ms, "auto_buy": auto_buy}
+
+
+def _monitor_stop():
+    _monitor["stop"] = True
+    _monitor["running"] = False
+    _log("收到停止监控请求")
+    return {"ok": True}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -440,6 +589,7 @@ class Handler(BaseHTTPRequestHandler):
                 "login": login,
                 "phone": _phone_value(),
                 "accounts": [{"name": a.name, "uid": a.uid} for a in _accounts()],
+                "monitor": {key: _monitor[key] for key in ("running", "last", "hits", "interval", "auto_buy")},
                 **{k: state[k] for k in ("running", "stage", "order_id", "payment_url", "finished")},
             })
             return
@@ -466,6 +616,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_poll_qr(body.get("key") or ""))
             elif parsed.path == "/api/fingerprint":
                 self._json(_fingerprint_preview(body))
+            elif parsed.path == "/api/monitor/start":
+                self._json(_monitor_start(body))
+            elif parsed.path == "/api/monitor/stop":
+                self._json(_monitor_stop())
             elif parsed.path == "/api/start":
                 self._json(_start_tasks(body))
             elif parsed.path == "/api/project":
@@ -650,6 +804,21 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
   </section>
 
   <section class="card">
+    <h2>回流监控</h2>
+    <div class="muted">只读轮询票档状态；发现目标 SKU 可购时自动用上面的配置开抢。建议 3000ms 起。</div>
+    <div class="row" style="margin-top:8px">
+      <label class="muted">间隔(ms)</label>
+      <input id="monitorInterval" type="number" min="1000" max="10000" value="3000">
+      <label class="muted"><input id="monitorAuto" type="checkbox" style="width:auto" checked> 自动开抢</label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="monitorStart">开始监控</button>
+      <button id="monitorStop" class="ghost">停止监控</button>
+    </div>
+    <div id="monitorInfo" class="muted" style="margin-top:6px">未运行</div>
+  </section>
+
+  <section class="card">
     <h2>运行</h2>
     <div id="runState" class="muted">空闲</div>
     <div class="row" style="margin-top:10px">
@@ -688,6 +857,12 @@ async function refreshStatus() {
       : (s.finished ? ('已结束：' + s.finished) : '空闲');
     if (s.payment_url) {
       $('payment').innerHTML = '<a style="color:#4ade80" href="' + s.payment_url + '" target="_blank">打开支付链接</a>';
+    }
+    const m = s.monitor || {};
+    if (m.running) {
+      $('monitorInfo').innerHTML = '<span class="ok">监控中</span> · ' + (m.last || '等待首次轮询') + (m.hits ? ' · 命中 ' + m.hits : '');
+    } else {
+      $('monitorInfo').textContent = m.hits ? ('监控已停止 · 命中 ' + m.hits + ' 次') : '未运行';
     }
   } catch (e) {}
 }
@@ -863,6 +1038,18 @@ $('startBtn').onclick = async () => {
 };
 
 $('stopBtn').onclick = () => api('/api/stop', {});
+$('monitorStart').onclick = async () => {
+  const text = $('configText').value.trim();
+  if (!text) { alert('先填入抢票配置 JSON'); return; }
+  const r = await api('/api/monitor/start', {
+    config_text: text,
+    interval: parseInt($('monitorInterval').value || '3000', 10),
+    auto_buy: $('monitorAuto').checked
+  });
+  if (!r.ok) alert(r.error || '启动监控失败');
+  refreshStatus();
+};
+$('monitorStop').onclick = () => api('/api/monitor/stop', {});
 $('refreshBtn').onclick = refreshStatus;
 
 let purchaseContext = null;
