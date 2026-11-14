@@ -16,6 +16,8 @@ from urllib.parse import urlparse, parse_qs
 
 HOME = ""
 PORT = 7861
+_service = None
+_service_port = None
 
 _logs = []
 _lock = threading.Lock()
@@ -664,8 +666,23 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": repr(exc)}, 500)
 
 
+def _service_alive(port):
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/status", timeout=1.2
+        ) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
 def start(home, port=7861):
-    global HOME, PORT
+    global HOME, PORT, _service, _service_port
+    if _service is not None:
+        _log(f"本地服务已在运行，端口 {_service_port}")
+        return _service_port
     HOME = home
     PORT = int(port)
     os.environ["BTB_HOME"] = home
@@ -693,10 +710,25 @@ def start(home, port=7861):
         "search_tickets": search_tickets,
     })
 
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    _log("本地服务已启动")
-    return PORT
+    last_error = None
+    for candidate in range(PORT, PORT + 8):
+        try:
+            server = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
+        except OSError as exc:
+            last_error = exc
+            if candidate == PORT and _service_alive(candidate):
+                _log(f"端口 {candidate} 已有本程序服务在运行，直接复用")
+                _service_port = candidate
+                return candidate
+            _log(f"端口 {candidate} 不可用（{exc}），尝试下一个端口")
+            continue
+        _service = server
+        _service_port = candidate
+        PORT = candidate
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        _log(f"本地服务已启动，端口 {candidate}")
+        return candidate
+    raise OSError(f"无法绑定本地端口 {PORT}-{PORT + 7}: {last_error}")
 
 
 INDEX_HTML = """<!doctype html>

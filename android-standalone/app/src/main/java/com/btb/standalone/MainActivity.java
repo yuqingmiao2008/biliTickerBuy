@@ -24,7 +24,7 @@ import com.chaquo.python.android.AndroidPlatform;
 public class MainActivity extends Activity {
 
     private static final int PORT = 7861;
-    private static final String URL = "http://127.0.0.1:" + PORT + "/";
+    private String baseUrl = "http://127.0.0.1:" + PORT + "/";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WebView webView;
@@ -73,12 +73,14 @@ public class MainActivity extends Activity {
                     Python.start(new AndroidPlatform(this));
                 }
                 PyObject server = Python.getInstance().getModule("server");
-                server.callAttr("start", getFilesDir().getAbsolutePath(), PORT);
+                int port = Integer.parseInt(String.valueOf(server.callAttr(
+                        "start", getFilesDir().getAbsolutePath(), PORT)));
+                baseUrl = "http://127.0.0.1:" + port + "/";
                 for (int i = 0; i < 60; i++) {
-                    if (isUp()) {
+                    if (isUp(baseUrl)) {
                         handler.post(() -> {
                             statusPanel.setVisibility(View.GONE);
-                            webView.loadUrl(URL);
+                            webView.loadUrl(baseUrl);
                         });
                         return;
                     }
@@ -91,10 +93,10 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private boolean isUp() {
+    private boolean isUp(String url) {
         try {
             java.net.HttpURLConnection c = (java.net.HttpURLConnection)
-                    new java.net.URL(URL).openConnection();
+                    new java.net.URL(url).openConnection();
             c.setConnectTimeout(1200);
             c.setReadTimeout(1200);
             int code = c.getResponseCode();
