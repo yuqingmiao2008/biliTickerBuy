@@ -553,6 +553,8 @@ INDEX_HTML = """<!doctype html>
 * { box-sizing: border-box; }
 body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #111; color: #eee; }
 header { padding: 14px 16px; background: #1b1b1b; font-weight: 600; border-bottom: 1px solid #2a2a2a; }
+.credit { margin-top: 4px; font-size: 12px; font-weight: 400; color: #999; line-height: 1.6; }
+.credit b { color: #ff99bb; font-weight: 600; }
 main { padding: 14px; display: grid; gap: 14px; }
 .card { background: #1b1b1b; border: 1px solid #2a2a2a; border-radius: 12px; padding: 14px; }
 .card h2 { margin: 0 0 10px; font-size: 15px; color: #ff6699; }
@@ -569,7 +571,10 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
 </style>
 </head>
 <body>
-<header>biliTickerBuy 独立版</header>
+<header>
+  biliTickerBuy 独立版
+  <div class="credit">原作：<b>mikumifa</b> / biliTickerBuy（github.com/mikumifa/biliTickerBuy）<br>二创：<b>yuqingmiao2008</b>（github.com/yuqingmiao2008）</div>
+</header>
 <main>
   <section class="card">
     <h2>账号</h2>
@@ -620,7 +625,7 @@ textarea { min-height: 140px; font-family: ui-monospace, monospace; }
     </div>
     <div class="row" style="margin-top:8px">
       <button id="useSaleBtn" class="ghost">用所选票档开售时间</button>
-      <span class="muted">两个都留空 = 立即开抢</span>
+      <span class="muted">两个都留空 = 立即开抢（热门场请务必填时间，提前请求可能触发 100041 封禁会员购）</span>
     </div>
     <div class="row" style="margin-top:8px">
       <label class="muted">间隔(ms)</label>
