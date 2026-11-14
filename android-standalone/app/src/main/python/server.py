@@ -460,7 +460,8 @@ def _monitor_loop(config_text, interval_ms, auto_buy):
         _monitor["last"] = "配置无效"
         return
     sale_start = str(payload.get("sale_start") or "")
-    date = sale_start[:10] if re.match(r"\d{4}-\d{2}-\d{2}", sale_start) else None
+    # 不按 sale_start 过滤日期：它可能是预售时间，和场次日期不一致；直接取全部场次再按 SKU 匹配。
+    date = None
     _log(f"回流监控启动：项目 {project_id}，SKU {sku_id}，间隔 {interval_ms}ms，自动开抢={auto_buy}")
     last_status = None
     while not _monitor["stop"]:
